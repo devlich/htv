@@ -1846,7 +1846,7 @@ function add_layout(name)
 		end
 
 		osc_styles.elementHover = createStyle(0, 0, osc_palette[user_opts.seekbarColorIndex], black, nil, nil)
-	
+
 		if (elements[name].type == "button") then
 			elements[name].layout.button = {
 				maxchars = nil,
@@ -1980,21 +1980,88 @@ function window_controls()
 	end
 end
 
---
--- Modernx Layout
---
+local function create_icons(icons)
+		local smallIconS = user_opts.smallIcon
+    for _, icon in ipairs(icons) do
+        if icon.geometry then
+            -- Appliquer les valeurs par défaut pour la géométrie
+            local default_geo = {
+                w = smallIconS,
+                h = smallIconS,
+                an = icon.geometry.an or 5  -- Valeur par défaut pour l'ancrage
+            }
 
-function layout()
+            -- Fusionner avec la géométrie spécifiée
+            local geo = setmetatable(icon.geometry, { __index = default_geo })
 
-	local minimalUI = user_opts.minimalUI	
+            local lo = add_layout(icon.name)
+            lo.geometry = geo
+            lo.style = icon.style
 
-	local osc_geo = {
-		w = osc_param.playresx,
-		h = 120 -- Not too low to avoid Thumbnails not disappearing
-	}
-	if minimalUI then
-		osc_geo.h = 90
-	end
+            -- Gestion des propriétés optionnelles
+            local optional_props = {'alpha', 'button', 'slider', 'layer'}
+            for _, prop in ipairs(optional_props) do
+                if icon[prop] then
+                    for k, v in pairs(icon[prop]) do
+                        lo[prop][k] = v
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Fonction pour créer un élément de fond avec un objet de configuration
+local function create_background(config)
+    new_element(config.name, "box")
+    local lo = add_layout(config.name)
+    lo.geometry = config.geometry
+    lo.style = config.style
+    lo.layer = config.layer or 10
+    if config.alpha then
+        for k, v in pairs(config.alpha) do
+            lo.alpha[k] = v
+        end
+    end
+    return lo
+end
+
+local function create_seekbar(config)
+    -- Créer le fond de la seekbar si spécifié
+    if config.bg then
+        new_element(config.bg.name or "bgBar", "box")
+        local bg_lo = add_layout(config.bg.name or "bgBar")
+        bg_lo.geometry = config.bg.geometry
+        bg_lo.style = config.bg.style or osc_styles.seekbarBg
+        bg_lo.layer = config.bg.layer or 13
+        if config.bg.alpha then
+            for k, v in pairs(config.bg.alpha) do
+                bg_lo.alpha[k] = v
+            end
+        end
+    end
+
+    -- Créer la seekbar elle-même
+    local fg_lo = add_layout("seekbar")
+    fg_lo.geometry = config.geometry
+    fg_lo.style = config.style or osc_styles.seekbarFg
+
+    if config.slider then
+        for k, v in pairs(config.slider) do
+            fg_lo.slider[k] = v
+        end
+    end
+
+    if config.alpha then
+        for k, v in pairs(config.alpha) do
+            fg_lo.alpha[k] = v
+        end
+    end
+
+end
+
+local function modernx(desc)
+	local osc_geo = desc.geometry
 	user_opts.heightoscShowHidearea = osc_geo.h
 
 	-- origin of the controllers, bottom left corner
@@ -2013,241 +2080,184 @@ function layout()
 	-- area for show/hide
 	add_area("showhide", 0, 0, osc_param.playresx, osc_param.playresy)
 
-	local lo, geo
-
 	-- offsets minimal interface
 	local minimalSeekY = 0
 	local yMinimalSeekW = 0
-	local xMinimalIcons = 0
 	local yMinimalIcons = 0
-	if minimalUI then
-		minimalSeekY = user_opts.minimalSeekY
-		yMinimalSeekW = osc_geo.w / 3
-		yMinimalIcons = minimalSeekY - 30
-	end
 
-	local smallIconS = user_opts.smallIcon					-- size small icons
-	local oscY = 30											-- osc y - Distance small buttons from the bottom
-	local gapNavButton = 40									-- gap between navigation buttons
-	local seekbarMarginX = 180 + yMinimalSeekW				-- seekbar margin with minimal offset
+	local oscY = 30
+	local gapNavButton = 40
+	local seekbarMarginX = 180 + yMinimalSeekW
 	local bgBarHeight = 1
+
 	if user_opts.seekbarBgHeight then
 		bgBarHeight = bgBarHeight + user_opts.seekbarHeight
 	end
+
 	local seekbarHeight = 15 + user_opts.seekbarHeight
-	xMinimalIcons = (osc_geo.w - seekbarMarginX)/2
 
 	-- Controller Background
+	local background = {
+		name = "transBg",
+		geometry = {x = posX, y = posY, an = 7, w = osc_geo.w, h = 10},
+		style = osc_styles.transBg,
+		layer = 10,
+		alpha = {[3] = 0}
+	}
 
-	new_element("transBg", "box")
-	lo = add_layout("transBg")
-	lo.geometry = {x = posX, y = posY, an = 7, w = osc_geo.w, h = 10}
-	if minimalUI then
-		lo.style = osc_styles.transBgMini
-	else
-		lo.style = osc_styles.transBg
-	end
-	lo.layer = 10
-	lo.alpha[3] = 0
+	local seekbar = {
+		geometry = {x = refX, y = refY - oscY - 30 + minimalSeekY, an = 5, w = osc_geo.w - seekbarMarginX, h = seekbarHeight},
+		style =  createStyle(0, 0, osc_palette[user_opts.seekbarColorIndex], white, nil, nil),
+		slider = {
+			gap = 7,
+			tooltip_style = osc_styles.tooltip,
+			tooltip_an = 2
+		},
+		bg = {
+			name = "bgBar",
+			geometry = {x = refX, y = refY - oscY - 30 + minimalSeekY, an = 5, w = osc_geo.w - seekbarMarginX, h = bgBarHeight},
+			style = osc_styles.seekbarBg,
+			layer = 13,
+			alpha = {[1] = user_opts.bgBarAlpha}
+		}
+	}
+	-- Calculate conditional positions
+	local prevnextPos = user_opts.showChapters and (3 * gapNavButton) or (2 * gapNavButton)
 
-	-- Seekbar
+	-- Title geometry and style
+	local title_geo = {x = 27, y = refY - oscY - 50, an = 1, w = osc_geo.w - 50, h = 48}
 
-	new_element("bgBar", "box")
-	lo = add_layout("bgBar")
-	lo.geometry = {x = refX, y = refY - oscY - 30 + minimalSeekY, an = 5, w = osc_geo.w - seekbarMarginX, h = bgBarHeight}
-	lo.style = osc_styles.seekbarBg
-	lo.layer = 13
-	lo.alpha[1] = user_opts.bgBarAlpha
-
-	osc_styles.seekbarFg = createStyle(0, 0, osc_palette[user_opts.seekbarColorIndex], white, nil, nil)
-
-	lo = add_layout("seekbar")
-	lo.geometry = {x = refX, y = refY - oscY - 30 + minimalSeekY, an = 5, w = osc_geo.w - seekbarMarginX, h = seekbarHeight}
-	lo.style = osc_styles.seekbarFg
-	lo.slider.gap = 7
-	lo.slider.tooltip_style = osc_styles.tooltip
-	lo.slider.tooltip_an = 2
-
-	-- Timecodes
-
-	lo = add_layout("tc_left")
-	if minimalUI then
-		lo.geometry = {x = refX - xMinimalIcons - 95, y = refY - oscY - 37 + minimalSeekY, an = 7, w = 50, h = smallIconS}
-	else
-		lo.geometry = {x = 27, y = refY - oscY - 37 + minimalSeekY, an = 7, w = 50, h = smallIconS}
-	end
-	lo.style = osc_styles.timecodeL
-
-	lo = add_layout("tc_right")
-	if minimalUI then
-		lo.geometry = {x = refX + xMinimalIcons + 50, y = refY - oscY - 37 + minimalSeekY, an = 7, w = 50, h = 200}
-	else
-		lo.geometry = {x = osc_geo.w - 25, y = refY - oscY - 37 + minimalSeekY, an = 9, w = 50, h = smallIconS}
-	end
-	lo.style = osc_styles.timecodeR
-
-	-- Playlist control buttons
-
-	local prevnextPos = (2 * gapNavButton)
-	if user_opts.showChapters then
-		prevnextPos = (3 * gapNavButton)
-	end
-
-	lo = add_layout("pl_prev")
-	if minimalUI then
-		lo.geometry = {x = refX - xMinimalIcons - 15, y = refY - oscY + yMinimalIcons, an = 5, w = smallIconS, h = smallIconS}
-	else
-		lo.geometry = {x = refX - prevnextPos, y = refY - oscY + yMinimalIcons, an = 5, w = smallIconS, h = smallIconS}
-	end
-	lo.style = osc_styles.mediumButtonsBig
-
-	lo = add_layout("pl_next")
-	if minimalUI then
-		lo.geometry = {x = refX + xMinimalIcons + 15, y = refY - oscY + yMinimalIcons, an = 5, w = smallIconS, h = smallIconS}
-	else
-		lo.geometry = {x = refX + prevnextPos, y = refY - oscY + yMinimalIcons, an = 5, w = smallIconS, h = smallIconS}
-	end
-	lo.style = osc_styles.mediumButtonsBig
-
-	-- Audio tracks
-	-- lo = add_layout("cy_audio")
-	-- if minimalUI then
-	-- 	lo.geometry = {x = refX - xMinimalIcons - oscY - 5, y = refY - oscY + yMinimalIcons, an = 5, w = smallIconS, h = smallIconS}
-	-- else
-	-- 	lo.geometry = {x = 60, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-	-- end
-	-- lo.style = osc_styles.togIcon
-
-	-- Subtitle tracks
-	-- lo = add_layout("cy_sub")
-	-- if minimalUI then
-	-- 	lo.geometry = {x = refX + xMinimalIcons + oscY + 5, y = refY - oscY + yMinimalIcons, an = 5, w = smallIconS, h = smallIconS}
-	-- else
-	-- 	lo.geometry = {x = 85, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-	-- end
-	-- lo.style = osc_styles.togIcon
-
-	-- If not minimal UI all other buttons
-	if not minimalUI then
-
+	-- Define elements
+	local icons = {
+		-- Timecodes
+		{
+			name = "tc_left",
+			geometry = {x = 27, y = refY - oscY - 37 + minimalSeekY, an = 7, w = 50 },
+			style = osc_styles.timecodeL
+		},
+		{
+			name = "tc_right",
+			geometry = {x = osc_geo.w - 25, y = refY - oscY - 37 + minimalSeekY, an = 9, w = 50 },
+			style = osc_styles.timecodeR
+		},
+		-- Playlist control buttons
+		{
+			name = "pl_prev",
+			geometry = {x = refX - prevnextPos, y = refY - oscY + yMinimalIcons },
+			style = osc_styles.mediumButtonsBig
+		},
+		{
+			name = "pl_next",
+			geometry = {x = refX + prevnextPos, y = refY - oscY + yMinimalIcons },
+			style = osc_styles.mediumButtonsBig
+		},
 		-- Title
-		geo = {x = 27, y = refY - oscY - 50, an = 1, w = osc_geo.w - 50, h = 48}
-		lo = add_layout("title")
-		lo.geometry = geo
-		lo.style = string.format("%s{\\clip(%f,%f,%f,%f)}", osc_styles.vidTitle,
-								 geo.x, geo.y - geo.h, geo.x + geo.w, geo.y)
-		lo.alpha[3] = 0
-
+		{
+			name = "title",
+			geometry = title_geo,
+			style = string.format("%s{\\clip(%f,%f,%f,%f)}", osc_styles.vidTitle, title_geo.x, title_geo.y - title_geo.h, title_geo.x + title_geo.w, title_geo.y),
+			alpha = {[3] = 0}
+		},
 		-- Playback control buttons
-
-		lo = add_layout("playpause")
-		lo.geometry = {x = refX, y = refY - oscY, an = 5, w = 45, h = 45}
-		lo.style = osc_styles.bigButtons
-
-		lo = add_layout("skipback")
-		lo.geometry = {x = refX - gapNavButton, y = refY - oscY + yMinimalIcons + 1, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.mediumButtons
-
-		lo = add_layout("skipfrwd")
-		lo.geometry = {x = refX + gapNavButton, y = refY - oscY + yMinimalIcons + 1, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.mediumButtons
-
-		if user_opts.showChapters then
-			lo = add_layout("ch_prev")
-			lo.geometry = {x = refX - (2 * gapNavButton), y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-			lo.style = osc_styles.mediumButtonsBig
-		end
-
-		if user_opts.showChapters then
-			lo = add_layout("ch_next")
-			lo.geometry = {x = refX + (2 * gapNavButton), y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-			lo.style = osc_styles.mediumButtonsBig
-		end
-
+		{
+			name = "playpause",
+			geometry = {x = refX, y = refY - oscY, w = 45, h = 45},
+			style = osc_styles.bigButtons
+		},
+		{
+			name = "skipback",
+			geometry = {x = refX - gapNavButton, y = refY - oscY + yMinimalIcons + 1 },
+			style = osc_styles.mediumButtons
+		},
+		{
+			name = "skipfrwd",
+			geometry = {x = refX + gapNavButton, y = refY - oscY + yMinimalIcons + 1 },
+			style = osc_styles.mediumButtons
+		},
+		-- Chapter buttons (conditional)
+		{
+			name = "ch_prev",
+			geometry = user_opts.showChapters and {x = refX - (2 * gapNavButton), y = refY - oscY } or nil,
+			style = osc_styles.mediumButtonsBig
+		},
+		{
+			name = "ch_next",
+			geometry = user_opts.showChapters and {x = refX + (2 * gapNavButton), y = refY - oscY } or nil,
+			style = osc_styles.mediumButtonsBig
+		},
 		-- Volume
-		lo = add_layout("volume")
-		lo.geometry = {x = 35, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.togIcon
-
-		-- Toggle tooltip
-		if user_opts.showIcons then
-			lo = add_layout("tog_tooltip")
-			lo.geometry = {x = 110, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-			lo.style = osc_styles.togIcon
-		end
-
-		-- Playback speed
-		if user_opts.showIcons then
-			lo = add_layout("playback_speed")
-			lo.geometry = {x = 140, y = refY - oscY - 0.5, an = 5, w = 30, h = smallIconS}
-			lo.style = osc_styles.speedButton
-		end
-
-		-- Cache
-		if user_opts.showIcons then
-			if user_opts.showCache then
-				lo = add_layout("cache")
-				lo.geometry = {x = 185, y = refY - oscY - 1.5, an = 5, w = 30, h = smallIconS}
-				lo.style = osc_styles.speedButton
-			end
-		end
-
-		if user_opts.showIcons then
-
-			-- Toggle loop
-			lo = add_layout("tog_loop")
-			lo.geometry = {x = osc_geo.w - 185, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-			lo.style = osc_styles.togIcon
-
-			-- Toggle thumbfast
-			lo = add_layout("tog_thumb")
-			lo.geometry = {x = osc_geo.w - 160, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-			lo.style = osc_styles.togIcon
-
-			-- Toggle OSC mode
-			lo = add_layout("tog_oscmode")
-			lo.geometry = {x = osc_geo.w - 135, y = refY - oscY - 1, an = 5, w = smallIconS, h = smallIconS}
-			lo.style = osc_styles.togIcon
-
-			-- Toggle on top
-			-- lo = add_layout("tog_ontop")
-			-- lo.geometry = {x = osc_geo.w - 110, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-			-- lo.style = osc_styles.togIcon
-
-		end
-
+		{
+			name = "volume",
+			geometry = {x = 35, y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		-- Toggle tooltip (conditional)
+		{
+			name = "tog_tooltip",
+			geometry = {x = 110, y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		-- Toggle OSC mode
+		{
+			name = "tog_oscmode",
+			geometry = {x = osc_geo.w - 135, y = refY - oscY - 1 },
+			style = osc_styles.togIcon
+		},
+		-- Playback speed (conditional)
+		{
+			name = "playback_speed",
+			geometry = {x = 140, y = refY - oscY - 0.5, w = 30 },
+			style = osc_styles.speedButton
+		},
+		-- Cache (conditional)
+		{
+			name = "cache",
+			geometry = user_opts.showCache and {x = 185, y = refY - oscY - 1.5, w = 30 } or nil,
+			style = osc_styles.speedButton
+		},
+		-- Toggle loop
+		{
+			name = "tog_loop",
+			geometry = {x = osc_geo.w - 185, y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		-- Toggle thumbfast
+		{
+			name = "tog_thumb",
+			geometry = {x = osc_geo.w - 160, y = refY - oscY },
+			style = osc_styles.togIcon
+		},
 		-- Toggle UI
-		lo = add_layout("tog_ui")
-		lo.geometry = {x = osc_geo.w - 85, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.togIcon
-
+		{
+			name = "tog_ui",
+			geometry = {x = osc_geo.w - 85, y = refY - oscY },
+			style = osc_styles.togIcon
+		},
 		-- Toggle info
-		lo = add_layout("tog_info")
-		lo.geometry = {x = osc_geo.w - 60, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.togIconBig
-
+		{
+			name = "tog_info",
+			geometry = {x = osc_geo.w - 60, y = refY - oscY },
+			style = osc_styles.togIconBig
+		},
 		-- Toggle fullscreen
-		lo = add_layout("tog_fs")
-		lo.geometry = {x = osc_geo.w - 35, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.togIconBig
-	end
+		{
+			name = "tog_fs",
+			geometry = {x = osc_geo.w - 35, y = refY - oscY },
+			style = osc_styles.togIconBig
+		}
+	}
+
+	-- Create all elements
+	create_background(background)
+	create_seekbar(seekbar)
+	create_icons(icons)
 end
 
 --
 -- Pot Layout
 --
-
-function layoutPot()
-
-	local minimalUI = user_opts.minimalUI
-
-	local osc_geo = {
-		w = osc_param.playresx,
-		h = 120 -- Not too low to avoid Thumbnails not disapearing
-	}
-	if minimalUI then
-		osc_geo.h = 70
-	end
+local function layoutPot(desc)
+	local osc_geo = desc.geometry
 	user_opts.heightoscShowHidearea = osc_geo.h
 
 	-- origin of the controllers, bottom left corner
@@ -2266,188 +2276,403 @@ function layoutPot()
 	-- area for show/hide
 	add_area("showhide", 0, 0, osc_param.playresx, osc_param.playresy)
 
-	local lo, geo
-
 	-- offsets
-	local oscY = 30										-- y offset buttons
-	local potRefX = 25									-- left x starting point
-	local gapNavButton = 35								-- gap between navigation buttons
-	local gapSmallButton = 25							-- gap between small buttons
-	local smallIconS = user_opts.smallIcon				-- size small icons
+	local oscY = 30
+	local potRefX = 25
+	local gapNavButton = 35
+	local gapSmallButton = 25
 	local bgBarHeight = 1
+
 	if user_opts.seekbarBgHeight then
 		bgBarHeight = bgBarHeight + user_opts.seekbarHeight
 	end
-	local seekbarHeight = 15 + user_opts.seekbarHeight 
-	
+
+	local seekbarHeight = 15 + user_opts.seekbarHeight
+
 	-- seekbar
-	local offsetSeekbarLeft = (3 * gapNavButton) + 125	-- seekbar left offset
-	if user_opts.showChapters and not minimalUI then
+	local offsetSeekbarLeft = (3 * gapNavButton) + 125
+	if user_opts.showChapters then
 		offsetSeekbarLeft = (5 * gapNavButton) + 125
 	end
-	local seekbarWidth = osc_geo.w - 35					-- seekbar width
-	local seekbarBgAlpha = user_opts.bgBarAlpha			-- seekbar background transparency
-	
-	-- offsets minimal interface
-	if minimalUI then
-		potRefX = 15
-		gapNavButton = 20
-		oscY = 15
-		offsetSeekbarLeft = (3 * gapNavButton) + 150 - potRefX
-		seekbarWidth = seekbarWidth - offsetSeekbarLeft - potRefX - gapNavButton
-		seekbarBgAlpha = 255
-	end
+
+	local seekbarWidth = osc_geo.w - 35
+	local seekbarBgAlpha = user_opts.bgBarAlpha
 
 	-- Controller Background
-
-	new_element("transBg", "box")
-	lo = add_layout("transBg")
-	lo.geometry = {x = posX, y = posY, an = 7, w = osc_geo.w, h = 10}
-	if minimalUI then
-		lo.style = osc_styles.transBgPotMini
-		lo.alpha[3] = 100
-	else
-		lo.style = osc_styles.transBgPot
-		lo.alpha[3] = 50
-	end
-	lo.layer = 10
-	-- lo.alpha[3] = 255
-
-	-- Seekbar
-
-	new_element("bgBar", "box")
-	lo = add_layout("bgBar")
-	if minimalUI then
-		lo.geometry = {x = potRefX + offsetSeekbarLeft, y = refY - oscY, an = 7, w = seekbarWidth, h = bgBarHeight}
-	else
-		lo.geometry = {x = refX, y = refY - oscY - 30, an = 5, w = seekbarWidth, h = bgBarHeight}
-	end
-	lo.style = osc_styles.seekbarBg
-	lo.layer = 13
-	lo.alpha[1] = seekbarBgAlpha
-
-	osc_styles.seekbarFg = createStyle(0, 0, osc_palette[user_opts.seekbarColorIndex], white, nil, nil)
-
-	lo = add_layout("seekbar")
-	local hhh = refX - (refX - potRefX + offsetSeekbarLeft)
-	if minimalUI then
-		lo.geometry = {x = refX + 52, y = refY - oscY + 1, an = 5, w = seekbarWidth, h = seekbarHeight}
-		lo.alpha[1] = 100
-	else
-		lo.geometry = {x = refX, y = refY - oscY - 30, an = 5, w = seekbarWidth, h = seekbarHeight}
-		lo.alpha[1] = 50
-	end
-	lo.style = osc_styles.seekbarFg
-	lo.slider.gap = 7
-	lo.slider.tooltip_style = osc_styles.tooltip
-	lo.slider.tooltip_an = 2
-	-- lo.alpha[1] = 0
-
-	-- Playback control buttons
-	
-	lo = add_layout("playpause")
-	lo.geometry = {x = potRefX, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-	if minimalUI then
-		lo.style = osc_styles.miniButtonsPot
-	else
-		lo.style = osc_styles.bigButtonsPot
-	end
-
-	lo = add_layout("pl_prev")
-	if user_opts.showChapters and not minimalUI then
-		lo.geometry = {x = potRefX + (3 * gapNavButton), y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-	lo.style = osc_styles.bigButtonsPot
-	else
-		lo.geometry = {x = potRefX + gapNavButton, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.miniButtonsPot
-	end
-
-	lo = add_layout("pl_next")
-	if user_opts.showChapters and not minimalUI then
-		lo.geometry = {x = potRefX + (4 * gapNavButton), y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-	lo.style = osc_styles.bigButtonsPot
-	else
-		lo.geometry = {x = potRefX + (2 * gapNavButton), y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.miniButtonsPot
-	end
-	
-	if user_opts.showChapters and not minimalUI then
-		lo = add_layout("ch_prev")
-		lo.geometry = {x = potRefX + gapNavButton, y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.bigButtonsPot
-	end
-
-	if user_opts.showChapters and not minimalUI then
-		lo = add_layout("ch_next")
-		lo.geometry = {x = potRefX + (2 * gapNavButton), y = refY - oscY, an = 5, w = smallIconS, h = smallIconS}
-		lo.style = osc_styles.bigButtonsPot
-	end
-
-	-- Timecodes
-	lo = add_layout("tc_left")
-	if user_opts.showChapters and not minimalUI then
-		lo.geometry = {x = potRefX + (5 * gapNavButton), y = refY - oscY + 1, an = 4, w = 50, h = smallIconS}
-	else
-		lo.geometry = {x = potRefX + (3 * gapNavButton), y = refY - oscY + 1, an = 4, w = 50, h = smallIconS}
-	end
-	lo.style = osc_styles.timecodeL
-
-	-- /
-	lo = add_layout("tc_separator")
-	if user_opts.showChapters and not minimalUI then
-		lo.geometry = {x = potRefX + (5 * gapNavButton) + 48, y = refY - oscY + 1, an = 4, w = 50, h = smallIconS}
-	else
-		lo.geometry = {x = potRefX + (3 * gapNavButton) + 48, y = refY - oscY + 1, an = 4, w = 50, h = smallIconS}
-	end
-	lo.style = osc_styles.timecodeR
-
-	lo = add_layout("tc_right")
-	if user_opts.showChapters and not minimalUI then
-		lo.geometry = {x = potRefX + (5 * gapNavButton) + 56, y = refY - oscY + 1, an = 4, w = 50, h = smallIconS}
-	else
-		lo.geometry = {x = potRefX + (3 * gapNavButton) + 56, y = refY - oscY + 1, an = 4, w = 50, h = smallIconS}
-	end
-	lo.style = osc_styles.timecodeR
-
-
-	local icon_elements = {
-		{ name = "tog_fs",         style = osc_styles.togIconBig, cond = user_opts.showIcons and not minimalUI },
-		-- { name = "tog_info",       style = osc_styles.togIconBig, cond = user_opts.showIcons },
-		-- { name = "cy_sub",   style = osc_styles.togIcon },
-		-- { name = "cy_audio", style = osc_styles.togIcon },
-		{ name = "tog_ui",         style = osc_styles.togIcon,    cond = user_opts.showIcons and not minimalUI },
-		{ name = "volume",         style = osc_styles.togIcon,    cond = user_opts.showIcons and not minimalUI },
-		{ name = "tog_ontop",      style = osc_styles.togIcon,    cond = user_opts.showIcons and (osc_param.playresx >= user_opts.visibleButtonsW) and not minimalUI },
-		{ name = "tog_oscmode",    style = osc_styles.togIcon,    cond = user_opts.showIcons and not minimalUI },
-		{ name = "tog_thumb",      style = osc_styles.togIcon,    cond = user_opts.showIcons and not minimalUI },
-		{ name = "tog_loop",       style = osc_styles.togIcon,    cond = user_opts.showIcons and not minimalUI },
-		{ name = "tog_tooltip",    style = osc_styles.togIcon,    cond = user_opts.showIcons and not minimalUI },
-		{ name = "playback_speed", style = osc_styles.speedButton, cond = user_opts.showIcons and not minimalUI },
-		-- { name = "cache",          style = osc_styles.speedButton, cond = user_opts.showIcons and user_opts.showCache },
-		{ gap = 5 },
-		{ name = "title",          style = osc_styles.titlePotMini, cond = not minimalUI },
+	local background = {
+		name = "transBg",
+		geometry = {x = posX, y = posY, an = 7, w = osc_geo.w, h = 10},
+		style = osc_styles.transBgPot,
+		layer = 10,
+		alpha = {[3] = 50}
 	}
 
+	local seekbar = {
+		geometry = {x = refX, y = refY - oscY - 30, an = 5, w = seekbarWidth, h = seekbarHeight},
+		style = osc_styles.seekbarFg,
+		alpha = {[1] = 50},
+		slider = {
+			gap = 7,
+			tooltip_style = osc_styles.tooltip,
+			tooltip_an = 2
+		},
+		bg = {
+			name = "bgBar",
+			geometry = {x = refX, y = refY - oscY - 30, an = 5, w = seekbarWidth, h = bgBarHeight},
+			style = osc_styles.seekbarBg,
+			layer = 13,
+			alpha = {[1] = seekbarBgAlpha}
+		}
+	}
 
-	local index = 0
-	for _, el in ipairs(icon_elements) do
-			if el.gap then
-					index = index + el.gap
-			elseif el.cond == nil or el.cond then
-					index = index + 1
-					local lo = add_layout(el.name)
-					lo.geometry = {
-							x = osc_geo.w - (index * gapSmallButton) - 5,
-							y = refY - oscY + ((el.name == "tog_oscmode" or el.name == "cache") and -1 or 0),
-							an = 5,
-							w = smallIconS,
-							h = smallIconS
-					}
-					lo.style = el.style
-			end
+	-- Calculate conditional positions
+	local timecodeX = user_opts.showChapters and (potRefX + (5 * gapNavButton)) or (potRefX + (3 * gapNavButton))
+	local plPrevX = user_opts.showChapters and (potRefX + (3 * gapNavButton)) or (potRefX + gapNavButton)
+	local plNextX = user_opts.showChapters and (potRefX + (4 * gapNavButton)) or (potRefX + (2 * gapNavButton))
+	local plPrevStyle = user_opts.showChapters and osc_styles.bigButtonsPot or osc_styles.miniButtonsPot
+	local plNextStyle = user_opts.showChapters and osc_styles.bigButtonsPot or osc_styles.miniButtonsPot
+
+	local icons = {
+		{
+			name = "playpause",
+			geometry = {x = potRefX, y = refY - oscY },
+			style = osc_styles.bigButtonsPot
+		},
+		{
+			name = "pl_prev",
+			geometry = {x = plPrevX, y = refY - oscY },
+			style = plPrevStyle
+		},
+		{
+			name = "pl_next",
+			geometry = {x = plNextX, y = refY - oscY },
+			style = plNextStyle
+		},
+		{
+			name = "ch_prev",
+			geometry = user_opts.showChapters and {x = potRefX + gapNavButton, y = refY - oscY } or nil,
+			style = osc_styles.bigButtonsPot
+		},
+		{
+			name = "ch_next",
+			geometry = user_opts.showChapters and {x = potRefX + (2 * gapNavButton), y = refY - oscY } or nil,
+			style = osc_styles.bigButtonsPot
+		},
+		{
+			name = "tc_left",
+			geometry = {x = timecodeX, y = refY - oscY + 1, an = 4, w = 50 },
+			style = osc_styles.timecodeL
+		},
+		{
+			name = "tc_separator",
+			geometry = {x = timecodeX + 48, y = refY - oscY + 1, an = 4, w = 50 },
+			style = osc_styles.timecodeR
+		},
+		{
+			name = "tc_right",
+			geometry = {x = timecodeX + 56, y = refY - oscY + 1, an = 4, w = 50 },
+			style = osc_styles.timecodeR
+		},
+		{
+			name = "tog_ontop",
+			geometry = {x = osc_geo.w - (6 * gapSmallButton), y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "cy_audio",
+			geometry = {x = osc_geo.w - (5 * gapSmallButton), y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "cy_sub",
+			geometry = {x = osc_geo.w - (4 * gapSmallButton), y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "title",
+			geometry = {x = potRefX + offsetSeekbarLeft, y = refY - oscY + 1, an = 4, w = seekbarWidth },
+			style = osc_styles.titlePotMini,
+			alpha = {[3] = 0},
+			button = {maxchars = ((not user_opts.vidscale and not state.fullscreen) or not state.fullscreen) and 50 or 75}
+		},
+		{
+			name = "cache",
+			geometry = user_opts.showCache and {x = osc_geo.w - (14 * gapSmallButton) - 5, y = refY - oscY - 1 } or nil,
+			style = osc_styles.speedButton
+		},
+		{
+			name = "playback_speed",
+			geometry = {x = osc_geo.w - (12 * gapSmallButton) - 5, y = refY - oscY + 1 },
+			style = osc_styles.speedButton
+		},
+		{
+			name = "tog_tooltip",
+			geometry = {x = osc_geo.w - (11 * gapSmallButton), y = refY - oscY + 1 },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "tog_loop",
+			geometry = {x = osc_geo.w - (10 * gapSmallButton), y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "tog_thumb",
+			geometry = {x = osc_geo.w - (9 * gapSmallButton), y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "tog_oscmode",
+			geometry = {x = osc_geo.w - (8 * gapSmallButton), y = refY - oscY - 1 },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "volume",
+			geometry = {x = osc_geo.w - (7 * gapSmallButton), y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "tog_ui",
+			geometry = {x = osc_geo.w - (3 * gapSmallButton), y = refY - oscY },
+			style = osc_styles.togIcon
+		},
+		{
+			name = "tog_info",
+			geometry = {x = osc_geo.w - (2 * gapSmallButton), y = refY - oscY },
+			style = osc_styles.togIconBig
+		},
+		{
+			name = "tog_fs",
+			geometry = {x = osc_geo.w - gapSmallButton, y = refY - oscY },
+			style = osc_styles.togIconBig
+		}
+	}
+
+	-- Création des éléments dans une boucle
+	create_background(background)
+	create_seekbar(seekbar)
+	create_icons(icons)
+end
+
+local function mini(desc)
+    user_opts.heightoscShowHidearea = desc.geometry.h
+
+    -- origin of the controllers, use provided origin or default to bottom-left
+    local posX = desc.origin and desc.origin.x or 0
+    local posY = desc.origin and desc.origin.y or osc_param.playresy
+
+    osc_param.areas = {} -- delete areas
+
+    -- area for active mouse input
+    add_area("input", get_hitbox_coords(posX, posY, 1, desc.geometry.w, desc.geometry.h))
+
+    -- area for show/hide
+    add_area("showhide", 0, 0, osc_param.playresx, osc_param.playresy)
+
+    -- Create all elements
+    if desc.background then
+        create_background(desc.background)
+    end
+    if desc.seekbar then
+        create_seekbar(desc.seekbar)
+    end
+    if desc.icons then
+        create_icons(desc.icons)
+    end
+end
+
+local function layout()
+
+	local desc = {
+		geometry = {
+			w = osc_param.playresx,
+			h = 120 -- Not too low to avoid Thumbnails not disappearing
+		},
+		origin = {
+			x = 0,
+			y = osc_param.playresy
+		}
+	}
+
+	local minimalUI = user_opts.minimalUI
+	if minimalUI then
+		desc.geometry.h = 90
 	end
 
+	if user_opts.modernTog and not minimalUI then
+		modernx(desc)
+	end
 
+	if user_opts.modernTog and minimalUI then
+		-- Configuration for modern mini style
+		local minimalSeekY = user_opts.minimalSeekY
+		local yMinimalSeekW = desc.geometry.w / 3
+		local xMinimalIcons = 0
+		local yMinimalIcons = minimalSeekY - 30
+		local oscY = 30
+		local seekbarMarginX = 180 + yMinimalSeekW
+		local bgBarHeight = 1
+
+		if user_opts.seekbarBgHeight then
+			bgBarHeight = bgBarHeight + user_opts.seekbarHeight
+		end
+
+		local seekbarHeight = 15 + user_opts.seekbarHeight
+		xMinimalIcons = (desc.geometry.w - seekbarMarginX)/2
+
+		local posY = osc_param.playresy
+		local refX = desc.geometry.w / 2
+		local refY = posY
+
+		-- Define elements for modern mini
+		desc.background = {
+			name = "transBg",
+			geometry = {x = 0, y = posY, an = 7, w = desc.geometry.w, h = 10},
+			style = osc_styles.transBgMini,
+			layer = 10,
+			alpha = {[3] = 0}
+		}
+		desc.seekbar = {
+			bg = {
+				name = "bgBar",
+				geometry = {x = refX, y = refY - oscY - 30 + minimalSeekY, an = 5, w = desc.geometry.w - seekbarMarginX, h = bgBarHeight},
+				style = osc_styles.seekbarBg,
+				layer = 13,
+				alpha = {[1] = user_opts.bgBarAlpha}
+			},
+			geometry = {x = refX, y = refY - oscY - 30 + minimalSeekY, an = 5, w = desc.geometry.w - seekbarMarginX, h = seekbarHeight},
+			style = createStyle(0, 0, osc_palette[user_opts.seekbarColorIndex], white, nil, nil),
+			slider = {
+				gap = 7,
+				tooltip_style = osc_styles.tooltip,
+				tooltip_an = 2
+			}
+		}
+
+		desc.icons = {
+			-- Timecodes
+			{
+				name = "tc_left",
+				geometry = {x = refX - xMinimalIcons - 95, y = refY - oscY - 37 + minimalSeekY, an = 7, w = 50 },
+				style = osc_styles.timecodeL
+			},
+			{
+				name = "tc_right",
+				geometry = {x = refX + xMinimalIcons + 50, y = refY - oscY - 37 + minimalSeekY, an = 7, w = 50, h = 200},
+				style = osc_styles.timecodeR
+			},
+			-- Playlist control buttons
+			{
+				name = "pl_prev",
+				geometry = {x = refX - xMinimalIcons - 15, y = refY - oscY + yMinimalIcons },
+				style = osc_styles.mediumButtonsBig
+			},
+			{
+				name = "pl_next",
+				geometry = {x = refX + xMinimalIcons + 15, y = refY - oscY + yMinimalIcons },
+				style = osc_styles.mediumButtonsBig
+			}
+		}
+
+		mini(desc)
+	end
+
+	if not user_opts.modernTog and minimalUI then
+
+		local refX = desc.geometry.w / 2
+		local refY = desc.origin.y
+
+		local oscY = 15
+		local potRefX = 15
+		local gapNavButton = 20
+		local seekbarHeight = 15
+
+		-- seekbar
+		local offsetSeekbarLeft = (3 * gapNavButton) + 150 - potRefX
+		local seekbarWidth = desc.geometry.w - 35 - offsetSeekbarLeft - potRefX - gapNavButton
+		local seekbarBgAlpha = 200
+
+		-- Define elements for Pot mini
+		desc.background = {
+			name = "transBg",
+			geometry = {x = 0, y = desc.origin.y, an = 7, w = desc.geometry.w, h = 10},
+			style = osc_styles.transBgPotMini,
+			layer = 10,
+			alpha = {[3] = 100}
+		}
+
+		osc_styles.seekbarFg = createStyle(0, 0, osc_palette[user_opts.seekbarColorIndex], white, nil, nil)
+		desc.seekbar = {
+			bg = {
+				name = "bgBar",
+				geometry = {x = refX + 52, y = refY - oscY + 1, an = 5, w = seekbarWidth, h = seekbarHeight/7},
+				style = osc_styles.seekbarBg,
+				layer = 13,
+				alpha = {[1] = seekbarBgAlpha}
+			},
+			geometry = {x = refX + 52, y = refY - oscY + 1, an = 5, w = seekbarWidth, h = seekbarHeight},
+			style = osc_styles.seekbarFg,
+			slider = {
+				gap = 7,
+				tooltip_style = osc_styles.tooltip,
+				tooltip_an = 2
+			},
+			alpha = {[1] = 100}
+		}
+
+		desc.icons = {
+			{
+				name = "playpause",
+				geometry = {x = potRefX, y = refY - oscY },
+				style = osc_styles.miniButtonsPot
+			},
+			{
+				name = "pl_prev",
+				geometry = {x = potRefX + gapNavButton, y = refY - oscY },
+				style = osc_styles.miniButtonsPot
+			},
+			{
+				name = "pl_next",
+				geometry = {x = potRefX + (2 * gapNavButton), y = refY - oscY },
+				style = osc_styles.miniButtonsPot
+			},
+			{
+				name = "tc_left",
+				geometry = {x = potRefX + (3 * gapNavButton), y = refY - oscY + 1, an = 4, w = 50 },
+				style = osc_styles.timecodeL
+			},
+			{
+				name = "tc_separator",
+				geometry = {x = potRefX + (3 * gapNavButton) + 48, y = refY - oscY + 1, an = 4, w = 50 },
+				style = osc_styles.timecodeR
+			},
+			{
+				name = "tc_right",
+				geometry = {x = potRefX + (3 * gapNavButton) + 56, y = refY - oscY + 1, an = 4, w = 50 },
+				style = osc_styles.timecodeR
+			},
+			{
+				name = "tog_ontop",
+				geometry = {x = desc.geometry.w - (3 * gapNavButton), y = refY - oscY },
+				style = osc_styles.togIcon
+			},
+			{
+				name = "cy_audio",
+				geometry = {x = desc.geometry.w - (2 * gapNavButton), y = refY - oscY },
+				style = osc_styles.togIcon
+			},
+			{
+				name = "tog_fs",
+				geometry = {x = desc.geometry.w - gapNavButton, y = refY - oscY },
+				style = osc_styles.togIconBig
+			}
+		}
+
+		mini(desc)
+	end
+
+	if not user_opts.modernTog and not minimalUI then
+		layoutPot(desc)
+	end
 end
 
 -- Validate string type user options
@@ -3123,6 +3348,7 @@ function osc_init()
 		end
 	end
 	ne.eventresponder["mbtn_left_up"] = function ()
+		user_opts.minimalUI = not user_opts.minimalUI 
 		user_opts.onTopWhilePlaying = false
 		if mp.get_property("ontop") == "no" then
 			was_ontop = false
@@ -3350,11 +3576,7 @@ function osc_init()
 	save_file()
 
 	-- load layout
-	if user_opts.modernTog then
-		layout()
-	else
-		layoutPot()
-	end
+	layout()
 
 	-- load window controls
 	if window_controls_enabled() then
