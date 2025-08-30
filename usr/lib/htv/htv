@@ -204,6 +204,7 @@ class MainWindow:
             "channel_stack",
             "fullscreen_button",
             "mpv_top_box",
+            "mpv_bottom_box",
             "label_channel_name",
             "label_channel_url",
             "provider_ok_button",
@@ -520,6 +521,7 @@ class MainWindow:
             box.set_spacing(6)
             button.add(box)
             self.categories_flowbox.add(button)
+
         self.categories_flowbox.show_all()
 
         if not found_groups:
@@ -726,9 +728,7 @@ class MainWindow:
             surface = self.get_surface_for_file(HTV_PATH + "/usr/share/htv/generic_tv_logo.png", 22, 22)
         return surface
 
-    def on_go_back_button(self, widget):
-        self.channels_listbox.set_filter_func(None)
-        self.channels_listbox.invalidate_filter()
+    def on_go_back_button(self, widget=None):
         self.navigate_to(self.back_page)
         if self.active_channel is not None:
             self.playback_bar.show()
@@ -752,8 +752,11 @@ class MainWindow:
 
     def on_search(self):
         self.visible_search_results = 0
-        self.channels_listbox.invalidate_filter()
-        self.show_channels([channel for channel in self.active_provider.channels if self.latest_search_bar_text in channel.name.lower()])
+        channels = []
+        for channel in self.active_provider.channels:
+            if self.latest_search_bar_text in channel.name.lower():
+                channels.append(channel)
+        self.show_channels(channels)
         if self.visible_search_results == 0:
             self.status(_("No channels found"))
         else:
@@ -767,7 +770,6 @@ class MainWindow:
         self.active_group = None
         for child in self.channels_listbox.get_children():
             self.channels_listbox.remove(child)
-        self.channels_listbox.invalidate_filter()
         self.visible_search_results = 0
 
     @idle_function
@@ -988,12 +990,37 @@ class MainWindow:
         self.mpv_drawing_area.grab_focus()
 
     def monitor_playback(self):
+        try:
+            self.mpv.unobserve_property("video-params", self.on_video_params)
+            self.mpv.unobserve_property("video-format", self.on_video_format)
+            self.mpv.unobserve_property("audio-params", self.on_audio_params)
+            self.mpv.unobserve_property("audio-codec", self.on_audio_codec)
+            self.mpv.unobserve_property("video-bitrate", self.on_bitrate)
+            self.mpv.unobserve_property("audio-bitrate", self.on_bitrate)
+            self.mpv.unobserve_property("core-idle", self.on_playback_changed)
+        except:
+            pass
         self.mpv.observe_property("video-params", self.on_video_params)
         self.mpv.observe_property("video-format", self.on_video_format)
         self.mpv.observe_property("audio-params", self.on_audio_params)
         self.mpv.observe_property("audio-codec", self.on_audio_codec)
         self.mpv.observe_property("video-bitrate", self.on_bitrate)
         self.mpv.observe_property("audio-bitrate", self.on_bitrate)
+        self.mpv.observe_property("core-idle", self.on_playback_changed)
+
+    @idle_function
+    def on_playback_changed(self, prop, idle):
+        if idle:
+            if self.inhibit_id != 0:
+                self.application.uninhibit(self.inhibit_id)
+                self.inhibit_id = 0
+        else:
+            if self.inhibit_id == 0:
+                self.inhibit_id = self.application.inhibit(
+                    self.window,
+                    Gtk.ApplicationInhibitFlags.IDLE | Gtk.ApplicationInhibitFlags.SUSPEND,
+                    "Playing media"
+                )
 
     @idle_function
     def on_bitrate(self, prop, bitrate):
@@ -1566,9 +1593,17 @@ class MainWindow:
         elif ctrl and event.keyval == Gdk.KEY_f:
             self.search_button.set_active(not self.search_button.get_active())
         elif event.keyval == Gdk.KEY_F11 or \
-             (event.keyval == Gdk.KEY_f and not ctrl) or \
-             (self.fullscreen and event.keyval == Gdk.KEY_Escape):
-            self.toggle_fullscreen()
+                (event.keyval == Gdk.KEY_f and not ctrl and type(widget.get_focus()) != gi.repository.Gtk.SearchEntry):
+            self.full_screen_mode()
+        elif event.keyval == Gdk.KEY_F6:
+            self.theather_mode()
+        elif event.keyval == Gdk.KEY_F7:
+            self.borderless_mode()
+        elif event.keyval == Gdk.KEY_Escape:
+            self.normal_mode()
+        elif event.keyval == Gdk.KEY_BackSpace and not ctrl and type(widget.get_focus()) != gi.repository.Gtk.SearchEntry:
+            self.normal_mode()
+            self.on_go_back_button()
         elif event.keyval == Gdk.KEY_Left:
             self.increment_channel(-1)
         elif event.keyval == Gdk.KEY_Right:
@@ -1758,25 +1793,21 @@ class MainWindow:
             # To prevent 'multiple values for keyword argument'!
             osc = options.pop("osc") != "no"
 
-        self.mpv = mpv.MPV(
-            **options,
-            script_opts="osc-layout=box,osc-seekbarstyle=bar,osc-deadzonesize=0,osc-minmousemove=3",
-            input_default_bindings=True,
-            input_vo_keyboard=True,
-            # osc=osc,
-            osc=False,
-            # log_handler=print,
-            # loglevel="debug",
-            ytdl=True,
-            wid=str(self.mpv_drawing_area.get_window().get_xid())
-        )
+        if self.mpv is None:
+            self.mpv = mpv.MPV(
+                **options,
+                script_opts="osc-layout=box,osc-seekbarstyle=bar,osc-deadzonesize=0,osc-minmousemove=3",
+                input_default_bindings=True,
+                input_vo_keyboard=True,
+                osc=osc,
+                ytdl=True,
+                # log_handler=print,
+                # loglevel="debug",
+                wid=str(self.mpv_drawing_area.get_window().get_xid())
+            )
         self.mpv.volume = self.volume
         self.mpv.observe_property("volume", self.on_volume_prop)
-        self.monitor_playback()
-        self.mpv_stack.set_visible_child_name("spinner_page")
-        self.spinner.start()
         self.mpv.observe_property("mouse-pos", self.on_mouse_motion)
-
         osc = os.path.join(os.path.dirname(__file__), "mpv/osc/osc.lua")
         self.mpv.command("load-script", osc)
         self.mpv.observe_property("fullscreen", self.on_mpv_fullscreen_change)
@@ -1805,11 +1836,60 @@ class MainWindow:
             self.headerbar.show()
             self.channels_box.set_border_width(12)
 
-    def toggle_fullscreen(self):
-        self.mpv.command('cycle', 'fullscreen')
+    def normal_mode(self):
+        self.window.unfullscreen()
+        self.mpv_top_box.show()
+        self.mpv_bottom_box.hide()
+        if self.content_type == TV_GROUP:
+            self.sidebar.show()
+        self.headerbar.show()
+        self.channels_box.set_border_width(12)
+        self.fullscreen = False
+
+    def theather_mode(self):
+        if self.stack.get_visible_child_name() == "channels_page":
+            if self.sidebar.get_visible():
+                self.mpv_top_box.hide()
+                self.mpv_bottom_box.hide()
+                self.sidebar.hide()
+                # self.headerbar.hide()
+                self.status_label.hide()
+                self.info_revealer.set_reveal_child(False)
+                self.channels_box.set_border_width(0)
+            else:
+                self.normal_mode()
+
+    def borderless_mode(self):
+        if self.stack.get_visible_child_name() == "channels_page":
+            if self.headerbar.get_visible():
+                self.mpv_top_box.hide()
+                self.mpv_bottom_box.hide()
+                self.sidebar.hide()
+                self.headerbar.hide()
+                self.status_label.hide()
+                self.info_revealer.set_reveal_child(False)
+                self.channels_box.set_border_width(0)
+            else:
+                self.normal_mode()
+
+    def full_screen_mode(self):
+        if self.stack.get_visible_child_name() == "channels_page":
+            self.fullscreen = not self.fullscreen
+            if self.fullscreen:
+                # Fullscreen mode
+                self.window.fullscreen()
+                self.mpv_top_box.hide()
+                self.mpv_bottom_box.hide()
+                self.sidebar.hide()
+                self.headerbar.hide()
+                self.status_label.hide()
+                self.info_revealer.set_reveal_child(False)
+                self.channels_box.set_border_width(0)
+            else:
+                self.normal_mode()
 
     def on_fullscreen_button_clicked(self, widget):
-        self.toggle_fullscreen()
+        self.full_screen_mode()
 
     def on_close_info_window_button_clicked(self, widget):
         self.info_window.hide()
@@ -1887,7 +1967,6 @@ class MainWindow:
             self.mpv.command("expand-properties", "show-text", formatted_text, "3000")
         except Exception as e:
             print(f"[WARN] Failed to show OSD text: {e}")
-
 
     def handle_channel_digits(self):
         if not self.channel_digits:
